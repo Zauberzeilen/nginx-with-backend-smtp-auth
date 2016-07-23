@@ -1,5 +1,6 @@
 
 /*
+ * Copyright (C) Bjoern Rennfanz
  * Copyright (C) Igor Sysoev
  * Copyright (C) Nginx, Inc.
  */
@@ -640,8 +641,72 @@ ngx_mail_proxy_smtp_handler(ngx_event_t *rev)
         s->mail_state = ngx_smtp_to;
 
         break;
+  
+    case ngx_smtp_user:
+        ngx_log_debug0(NGX_LOG_DEBUG_MAIL, rev->log, 0, 
+                       "mail proxy send user");
+
+        s->connection->log->action = "sending user name to upstream";
+
+        line.data = ngx_pnalloc(c->pool, ngx_base64_encoded_length(s->login.len) + 2);
+        if (line.data == NULL) {
+            ngx_mail_proxy_internal_server_error(s);
+            return;
+        }
+
+        ngx_encode_base64(&line, &s->login);
+        line.data[line.len++] = CR;
+        line.data[line.len++] = LF;
+        
+        s->mail_state = ngx_smtp_pass;
+        
+        break;
+
+    case ngx_smtp_pass:
+        ngx_log_debug0(NGX_LOG_DEBUG_MAIL, rev->log, 0, 
+                       "mail proxy send pass");
+
+        s->connection->log->action = "sending password to upstream";
+
+        line.data = ngx_pnalloc(c->pool, ngx_base64_encoded_length(s->passwd.len) + 2);
+        if (line.data == NULL) {
+            ngx_mail_proxy_internal_server_error(s);
+            return;
+        }
+
+        ngx_encode_base64(&line, &s->passwd);
+        line.data[line.len++] = CR;
+        line.data[line.len++] = LF;
+        
+        s->mail_state = ngx_smtp_authok;
+        
+        break;
 
     case ngx_smtp_helo:
+
+        // attempt to login if username and password were returned by auth http
+        if(s->login.len && s->passwd.len) {
+            ngx_log_debug0(NGX_LOG_DEBUG_MAIL, rev->log, 0, 
+                           "mail proxy send auth login");
+
+            s->connection->log->action = "sending auth login to upstream";
+            
+            line.len = sizeof("AUTH LOGIN") + 1;
+            line.data = ngx_pnalloc(c->pool, line.len);
+            if (line.data == NULL) {
+                ngx_mail_proxy_internal_server_error(s);
+                return;
+            }
+
+            p = ngx_cpymem(line.data, "AUTH LOGIN", sizeof("AUTH LOGIN") - 1);
+            *p++ = CR; *p = LF;
+            
+            s->mail_state = ngx_smtp_user;
+            break;
+        }
+        // fall through if not trying to log in...
+
+    case ngx_smtp_authok:
     case ngx_smtp_xclient:
     case ngx_smtp_to:
 
@@ -834,6 +899,19 @@ ngx_mail_proxy_read_response(ngx_mail_session_t *s, ngx_uint_t state)
         case ngx_smtp_xclient_from:
         case ngx_smtp_xclient_helo:
             if (p[0] == '2' && (p[1] == '2' || p[1] == '5') && p[2] == '0') {
+                return NGX_OK;
+            }
+            break;
+
+        case ngx_smtp_user:
+        case ngx_smtp_pass:
+            if (p[0] == '3' && p[1] == '3' && p[2] == '4') {
+                return NGX_OK;
+            }
+            break;
+            
+        case ngx_smtp_authok:
+            if (p[0] == '2' && p[1] == '3' && p[2] == '5') {
                 return NGX_OK;
             }
             break;

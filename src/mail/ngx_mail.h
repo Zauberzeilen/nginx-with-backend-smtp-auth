@@ -1,5 +1,6 @@
 
 /*
+ * Copyright (C) Bjoern Rennfanz
  * Copyright (C) Igor Sysoev
  * Copyright (C) Nginx, Inc.
  */
@@ -163,7 +164,10 @@ typedef enum {
     ngx_smtp_xclient_from,
     ngx_smtp_xclient_helo,
     ngx_smtp_from,
-    ngx_smtp_to
+    ngx_smtp_to,
+    ngx_smtp_user,
+    ngx_smtp_pass,
+    ngx_smtp_authok
 } ngx_smtp_state_e;
 
 
